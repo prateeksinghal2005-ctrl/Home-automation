@@ -9,6 +9,7 @@
 <style>
 :root{--bg:#14171a;--panel:#1d2226;--line:#2b3238;--text:#e8ecef;--dim:#8b96a0;--amber:#f5b942;--ink:#2a1d00;color-scheme:dark}
 *{box-sizing:border-box;margin:0}
+[hidden]{display:none!important}
 body{font-family:Outfit,system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100dvh;max-width:480px;margin:auto;padding:max(20px,env(safe-area-inset-top)) 20px max(24px,env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:18px}
 header{display:flex;justify-content:space-between;align-items:center}
 h1{font-size:22px;font-weight:600}
@@ -97,15 +98,21 @@ $('#conn').onclick=async()=>{
   }catch(e){}
 })();
 
-const SR=window.SpeechRecognition||window.webkitSpeechRecognition,mic=$('#mic');
-if(!SR){mic.hidden=true;$('#heard').textContent='Voice needs Chrome';}
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition,mic=$('#mic'),heard=$('#heard');
+const MSG={'not-allowed':'Mic blocked. Allow Microphone for this site in Chrome settings','service-not-allowed':'Open this page in the Chrome browser','network':'Voice needs internet. Turn on mobile data','no-speech':'Heard nothing. Tap the mic and try again','audio-capture':'No microphone found','language-not-supported':'Hindi is not supported here'};
+if(!window.isSecureContext){mic.hidden=true;heard.textContent='Open the https:// link, not a saved file';}
+else if(!SR){mic.hidden=true;heard.textContent='Voice needs Chrome';}
 else{
-  const r=new SR();r.lang='hi-IN';
-  r.onstart=()=>mic.classList.add('live');
+  const r=new SR();r.lang='hi-IN';r.interimResults=false;r.maxAlternatives=1;
+  r.onstart=()=>{mic.classList.add('live');heard.textContent='Listening…';};
   r.onend=()=>mic.classList.remove('live');
-  r.onresult=e=>{const t=e.results[0][0].transcript;$('#heard').textContent='Heard: '+t;send(t);};
-  r.onerror=e=>{$('#heard').textContent='Mic error: '+e.error;};
-  mic.onclick=()=>{try{r.start();}catch(_){}};
+  r.onresult=e=>{
+    const t=e.results[0][0].transcript;
+    heard.textContent='Heard: '+t+(ready?'':' (connect first)');
+    send(t);
+  };
+  r.onerror=e=>{heard.textContent=MSG[e.error]||('Mic error: '+e.error);};
+  mic.onclick=()=>{try{r.start();}catch(_){r.stop();}};
 }
 </script>
 </body>
