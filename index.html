@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14171a">
+<title>Home control</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#14171a;--panel:#1d2226;--line:#2b3238;--text:#e8ecef;--dim:#8b96a0;--amber:#f5b942;--ink:#2a1d00;color-scheme:dark}
+*{box-sizing:border-box;margin:0}
+body{font-family:Outfit,system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100dvh;max-width:480px;margin:auto;padding:max(20px,env(safe-area-inset-top)) 20px max(24px,env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:18px}
+header{display:flex;justify-content:space-between;align-items:center}
+h1{font-size:22px;font-weight:600}
+button{font:inherit;color:inherit;cursor:pointer}
+#conn{font-size:14px;padding:8px 14px;border-radius:20px;border:1px solid var(--line);background:var(--panel);color:var(--dim)}
+#conn.ok{color:var(--amber);border-color:var(--amber)}
+#list{display:flex;flex-direction:column;gap:12px}
+.row{display:flex;align-items:center;justify-content:space-between;width:100%;padding:20px;border-radius:16px;background:var(--panel);border:1px solid var(--line);text-align:left;transition:background .2s,color .2s}
+.row b{display:block;font-size:20px;font-weight:500}
+.row small{font-size:13px;color:var(--dim)}
+.row.on{background:var(--amber);border-color:var(--amber);color:var(--ink)}
+.row.on small{color:var(--ink)}
+.sw{flex:none;width:52px;height:30px;border-radius:15px;background:var(--line);position:relative}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:var(--dim);transition:transform .2s}
+.on .sw{background:var(--ink)}
+.on .sw::after{transform:translateX(22px);background:var(--amber)}
+footer{margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:12px}
+#mic{width:80px;height:80px;border-radius:50%;border:1px solid var(--amber);background:var(--panel);display:grid;place-items:center}
+#mic.live{background:var(--amber);animation:p 1s infinite}
+#mic svg{width:34px;height:34px;fill:none;stroke:var(--amber);stroke-width:2;stroke-linecap:round}
+#mic.live svg{stroke:var(--ink)}
+#heard{font-size:14px;color:var(--dim);min-height:20px;text-align:center}
+@keyframes p{50%{box-shadow:0 0 0 12px rgba(245,185,66,.18)}}
+@media (prefers-reduced-motion:reduce){#mic.live{animation:none}}
+</style>
+</head>
+<body>
+<header><h1>Home control</h1><button id="conn">Tap to connect</button></header>
+<div id="list"></div>
+<footer>
+  <button id="mic" aria-label="Speak a command"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+  <div id="heard">Tap the mic and speak</div>
+</footer>
+<script>
+const NAMES=['Fan','Dim light','Socket','Tubelight'],ON='ABCD',OFF='abcd';
+const SVC='6e400001-b5a3-f393-e0a9-e50e24dcca9e',RXC='6e400002-b5a3-f393-e0a9-e50e24dcca9e',TXC='6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+const $=s=>document.querySelector(s),sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const rows=NAMES.map((n,i)=>{
+  const b=document.createElement('button');
+  b.className='row';b.setAttribute('role','switch');b.setAttribute('aria-checked','false');
+  b.innerHTML='<span><b>'+n+'</b><small>Off</small></span><span class="sw"></span>';
+  b.onclick=()=>send(b.getAttribute('aria-checked')==='true'?OFF[i]:ON[i]);
+  $('#list').appendChild(b);return b;
+});
+function paint(s){rows.forEach((b,i)=>{const on=s[i]==='1';b.classList.toggle('on',on);b.setAttribute('aria-checked',on);b.querySelector('small').textContent=on?'On':'Off';});}
+function say(t,ok){const c=$('#conn');c.textContent=t;c.classList.toggle('ok',!!ok);}
+
+let dev,rx,tx,buf='',ready=false,busy=false;
+function attach(d){dev=d;dev.addEventListener('gattserverdisconnected',()=>{ready=false;say('Reconnecting…');keepAlive();});}
+async function link(){
+  const g=await dev.gatt.connect(),sv=await g.getPrimaryService(SVC);
+  rx=await sv.getCharacteristic(RXC);tx=await sv.getCharacteristic(TXC);
+  await tx.startNotifications();tx.addEventListener('characteristicvaluechanged',onData);
+  ready=true;say('Connected',true);send('S');
+}
+async function keepAlive(){
+  if(busy)return;busy=true;
+  while(!ready){
+    try{await link();}catch(e){try{dev.gatt.disconnect();}catch(_){}await sleep(2500);}
+  }
+  busy=false;
+}
+async function send(t){
+  if(!ready)return;
+  try{await rx.writeValue(new TextEncoder().encode(t+'\n'));}catch(e){say('Send failed');}
+}
+function onData(e){
+  buf+=new TextDecoder().decode(e.target.value);let i;
+  while((i=buf.indexOf('\n'))>=0){
+    const l=buf.slice(0,i).trim();buf=buf.slice(i+1);
+    if(l.startsWith('STATUS:'))paint(l.slice(7));else if(l)$('#heard').textContent=l;
+  }
+}
+$('#conn').onclick=async()=>{
+  if(ready)return;
+  try{
+    if(!dev)attach(await navigator.bluetooth.requestDevice({filters:[{services:[SVC]}]}));
+    say('Connecting…');keepAlive();
+  }catch(e){say('Tap to connect');}
+};
+(async()=>{
+  if(!navigator.bluetooth){say('Open in Chrome');return;}
+  try{
+    const d=(await navigator.bluetooth.getDevices()).find(x=>x.name==='ESP32_HOME');
+    if(d){attach(d);say('Connecting…');keepAlive();}
+  }catch(e){}
+})();
+
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition,mic=$('#mic');
+if(!SR){mic.hidden=true;$('#heard').textContent='Voice needs Chrome';}
+else{
+  const r=new SR();r.lang='hi-IN';
+  r.onstart=()=>mic.classList.add('live');
+  r.onend=()=>mic.classList.remove('live');
+  r.onresult=e=>{const t=e.results[0][0].transcript;$('#heard').textContent='Heard: '+t;send(t);};
+  r.onerror=e=>{$('#heard').textContent='Mic error: '+e.error;};
+  mic.onclick=()=>{try{r.start();}catch(_){}};
+}
+</script>
+</body>
+</html>
